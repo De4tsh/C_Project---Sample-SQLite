@@ -637,38 +637,70 @@ void free_table(Table* table)
 接下来最重要的部分来了，既然定义了数据在内存中的存储格式，以及分页的管理机制，**[那么如何确定在内存中读取/写入特定的数据的位置，就是我们下一个要关注的点了]{.ul}**
 
 ``` {.c}
-// 当此处参数中传入的row_num值表示是当前已经存在的数据总条数时，该函数的作用是定位到新传入的一条数据应该写入的位置
-// 当此处参数中传入的row_num值表示是第多少多少条时，该函数的作用是查找该条数据的位置
-void* row_slot(Table* table,uint32_t row_num)
-{
-    // 确定要读取/写入数据的地方的页号
-    /*
-    	若传入的数据的条数小于一页中最多可容纳的数据条数
-    	就说明该数据就在第一页中
-    */
-	uint32_t page_num = row_num / ROWS_PER_PAGE;
-    
-    // 确认了页号后，根据在页指针数组中找到该页对应的指针
-    void* page = table -> pages[page_num]
-        
-   	if (page == NULL)
-    {
-        // 若要找的页不存在，我们就分配空间建立该页
-        // 并将新创建的页的指针加入页指针数组
-        // 将当前的指针指向该页
-        page = table->pages[page_num] = malloc(PAGE_SIZE)
-    }
-    
-    // 此处参数中要传入的row_num值表示的是当前已经存在的数据总条数
-    // 数据总条数 % 每一页可容纳的数据数 = 当前页已经存在的数据条数
-    uint32_t row_offset = row_num % ROWS_PER_PAGE;
-    
-    // 当前页已经存在的数据条数 * 每条数据的大小 = 要存新数据的起始字节偏移量
-    uint32_t byte_offset = row_offset * ROW_SIZE;
-    
-    // 返回所要插入新数据的位置（偏移）
-    // 或返回所查找数据的位置（偏移）
-    return page + byte_offset;
+// 当此处参数中传入的row_num值表示是当前已经存在的数据总条数时，该函数的作用是定位到新传入的一条数据应该写入的位置
+
+// 当此处参数中传入的row_num值表示是第多少多少条时，该函数的作用是查找该条数据的位置
+
+void* row_slot(Table* table,uint32_t row_num)
+
+{
+
+    // 确定要读取/写入数据的地方的页号
+
+    /*
+
+    	若传入的数据的条数小于一页中最多可容纳的数据条数
+
+    	就说明该数据就在第一页中
+
+    */
+
+	uint32_t page_num = row_num / ROWS_PER_PAGE;
+
+    
+
+    // 确认了页号后，根据在页指针数组中找到该页对应的指针
+
+    void* page = table -> pages[page_num]
+
+        
+
+   	if (page == NULL)
+
+    {
+
+        // 若要找的页不存在，我们就分配空间建立该页
+
+        // 并将新创建的页的指针加入页指针数组
+
+        // 将当前的指针指向该页
+
+        page = table->pages[page_num] = malloc(PAGE_SIZE)
+
+    }
+
+    
+
+    // 此处参数中要传入的row_num值表示的是当前已经存在的数据总条数
+
+    // 数据总条数 % 每一页可容纳的数据数 = 当前页已经存在的数据条数
+
+    uint32_t row_offset = row_num % ROWS_PER_PAGE;
+
+    
+
+    // 当前页已经存在的数据条数 * 每条数据的大小 = 要存新数据的起始字节偏移量
+
+    uint32_t byte_offset = row_offset * ROW_SIZE;
+
+    
+
+    // 返回所要插入新数据的位置（偏移）
+
+    // 或返回所查找数据的位置（偏移）
+
+    return page + byte_offset;
+
 }
 ```
 
@@ -711,41 +743,70 @@ typedef enum
 之后我们在分别实现`insert`和`select`的函数
 
 ``` {.c}
-
-+ExecuteResult execute_insert(Statement* statement,Table* table)
-{
-    // 若当前页表中所有的页都已满，则不能再插入了
-    if (table->num_rows >= TABLE_MAX_ROWS)
-    {
-        return EXECUTE_TABLE_FULL;
-    }
-    
-    // 提示：statement->row_to_insert中存放着用户要插入的详细数据
-    Row* row_to_insert = &(statement->row_to_insert);
-    
-    // 将序列化的后的数据写入页中
-    serialize_row(row_to_insert,row_slot(table,table->num_rows));
-    
-    table->nums_rows += 1; // 插入了一条数据后，总的数据条数+1
-    
-    return EXECUTE_SUCCESS;
+
+
++ExecuteResult execute_insert(Statement* statement,Table* table)
+
+{
+
+    // 若当前页表中所有的页都已满，则不能再插入了
+
+    if (table->num_rows >= TABLE_MAX_ROWS)
+
+    {
+
+        return EXECUTE_TABLE_FULL;
+
+    }
+
+    
+
+    // 提示：statement->row_to_insert中存放着用户要插入的详细数据
+
+    Row* row_to_insert = &(statement->row_to_insert);
+
+    
+
+    // 将序列化的后的数据写入页中
+
+    serialize_row(row_to_insert,row_slot(table,table->num_rows));
+
+    
+
+    table->nums_rows += 1; // 插入了一条数据后，总的数据条数+1
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
 这样简单的`insert`就实现了，按照这种模式，我们把`select`也一块完成了
 
 ``` {.c}
-ExecuteResult execute_select(Statement* statement,Table* table)
-{
-    Row row;
-    for (uint32_t i = 0; i < table->num_rows; i++)
-    {
-        // 将内存中序列化后的数据反序列化为结构体中的数据结构
-        deserialize_row(row_slot(table,i),&row);
-        print_row(&row);
-    }
-    
-    return EXECUTE_SUCCESS;
+ExecuteResult execute_select(Statement* statement,Table* table)
+
+{
+
+    Row row;
+
+    for (uint32_t i = 0; i < table->num_rows; i++)
+
+    {
+
+        // 将内存中序列化后的数据反序列化为结构体中的数据结构
+
+        deserialize_row(row_slot(table,i),&row);
+
+        print_row(&row);
+
+    }
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
@@ -754,51 +815,96 @@ ExecuteResult execute_select(Statement* statement,Table* table)
 好了现在到了第三部分的最后一步了，将我们上述实现的功能合并进`main()`函数即可
 
 ``` {.c}
-+ #include <stdint.h>
-
-int main(int argc, char* argv[]) 
-{
-+  Table* table = new_table();
-   InputBuffer* input_buffer = new_input_buffer();
-   while (true) {
-     print_prompt();
-     read_input(input_buffer);
-
-+    if (input_buffer->buffer[0] == '.') 
-+	{
-+     switch (do_meta_command(input_buffer, table)) 
-+	 {
-+        case (META_COMMAND_SUCCESS):
-+          continue;
-+        case (META_COMMAND_UNRECOGNIZED_COMMAND):
-+          printf("Unrecognized command '%s'\n", input_buffer->buffer);
-+          continue;
-+      }
-+    }
-+
-+   Statement statement;
-+   switch (prepare_statement(input_buffer, &statement)) 
-+	{
-+      case (PREPARE_SUCCESS):
-+        break;
-+      case (PREPARE_SYNTAX_ERROR):
-+		printf("Syntax error. Could not parse statement.\n");
-+		continue;
-+      case (PREPARE_UNRECOGNIZED_STATEMENT):
-+        printf("Unrecognized keyword at start of '%s'.\n",input_buffer->buffer);
-+        continue;
-+    }
-+
-+    switch (execute_statement(&statement, table))
-+	{
-+		case (EXECUTE_SUCCESS):
-+	    	printf("Executed.\n");
-+	    	break;
-+		case (EXECUTE_TABLE_FULL):
-+	    	printf("Error: Table full.\n");
-+	    	break;
-     }
-   }
++ #include <stdint.h>
+
+
+
+int main(int argc, char* argv[]) 
+
+{
+
++  Table* table = new_table();
+
+   InputBuffer* input_buffer = new_input_buffer();
+
+   while (true) {
+
+     print_prompt();
+
+     read_input(input_buffer);
+
+
+
++    if (input_buffer->buffer[0] == '.') 
+
++	{
+
++     switch (do_meta_command(input_buffer, table)) 
+
++	 {
+
++        case (META_COMMAND_SUCCESS):
+
++          continue;
+
++        case (META_COMMAND_UNRECOGNIZED_COMMAND):
+
++          printf("Unrecognized command '%s'\n", input_buffer->buffer);
+
++          continue;
+
++      }
+
++    }
+
++
+
++   Statement statement;
+
++   switch (prepare_statement(input_buffer, &statement)) 
+
++	{
+
++      case (PREPARE_SUCCESS):
+
++        break;
+
++      case (PREPARE_SYNTAX_ERROR):
+
++		printf("Syntax error. Could not parse statement.\n");
+
++		continue;
+
++      case (PREPARE_UNRECOGNIZED_STATEMENT):
+
++        printf("Unrecognized keyword at start of '%s'.\n",input_buffer->buffer);
+
++        continue;
+
++    }
+
++
+
++    switch (execute_statement(&statement, table))
+
++	{
+
++		case (EXECUTE_SUCCESS):
+
++	    	printf("Executed.\n");
+
++	    	break;
+
++		case (EXECUTE_TABLE_FULL):
+
++	    	printf("Error: Table full.\n");
+
++	    	break;
+
+     }
+
+   }
+
  }
 ```
 
@@ -1145,22 +1251,38 @@ Table* new_table()
 -   初始化Table `pager_open()`
 
 ``` {.c}
-// 新的初始化函数由于兼顾了打开数据库文件的功能，所以我们将其重命名为db_open()
--	Table* new_table(){
-+	Table* db_open(const char* filename)
-	{
-    	// 该函数将在接下来实现，用于打开数据库文件
-		Pager* pager = pager_open(filename);
-    	// 算出当前数据库文件已经存在总共多少条用户信息
-    	uint32_t num_rows = pager->file_length / ROW_SIZE;
-    
-    	Table *table = malloc(sizeof(Table));
-    	table->pager = pager;
-    	table->num_rows = num_rows; 
-    // 此时虽然没有将本地文件中的所有数据读回内存，但是已在内存中为其分配了“内存空间”即虽然没有将数据导	// 入，但这块空间已经被占用，并随时准备将所要查询的在本地文件中的数据放回内存对应的页中
-    
-    	return table;
-	}
+// 新的初始化函数由于兼顾了打开数据库文件的功能，所以我们将其重命名为db_open()
+
+-	Table* new_table(){
+
++	Table* db_open(const char* filename)
+
+	{
+
+    	// 该函数将在接下来实现，用于打开数据库文件
+
+		Pager* pager = pager_open(filename);
+
+    	// 算出当前数据库文件已经存在总共多少条用户信息
+
+    	uint32_t num_rows = pager->file_length / ROW_SIZE;
+
+    
+
+    	Table *table = malloc(sizeof(Table));
+
+    	table->pager = pager;
+
+    	table->num_rows = num_rows; 
+
+    // 此时虽然没有将本地文件中的所有数据读回内存，但是已在内存中为其分配了“内存空间”即虽然没有将数据导	// 入，但这块空间已经被占用，并随时准备将所要查询的在本地文件中的数据放回内存对应的页中
+
+    
+
+    	return table;
+
+	}
+
 ```
 
 接下来我们来顺着实现用于打开文件的函数`pager_open()`
@@ -1214,54 +1336,102 @@ Pager* pager_open(const char* filename)
 所以我们的逻辑是这样的，当我们查询某条数据时，若该数据并不在内存中时，我们的做法是将本地数据库文件加载进内存，但若我们要请求的页面位于文件边界之外，就说明他是空白的，此时我们只是分配一些内存并返回，当我们稍后退出数据库的时候，会将新增的数据的页刷新进本地文件中
 
 ``` {.c}
-// 其中page_num代表着当前要查询的数据位于哪页中
-// 接下来会重写row_slot，到时候就会清晰
-void* get_page(Pager* pager,uint32_t page_num)
-{
-    // 若要找/添加的数据超过最大页限制
-    if (page_num > TABLE_MAX_PAGES)
-    {
-        printf("Tired to fetch page number out of bounds.%d > %d\n",page_num,PAGE_MAX_PAGES);
-        exit(EXIT_FAILURE);
-    }
-    
-    // 若请求的页面不存在，在内存中分配空间，用于从本地数据库文件中加载
-    // 因为数据库中的页对应关系和内存中是相同的
-    if (pager->pages[page_num] == NULL)
-    {	
-        // 为其分配页空间
-        void* page = malloc(PAGE_SIZE);
-        // 当前本地文件中存在多少页的数据
-        uint32_t num_pages = pager->file_length / PAGE_SIZE;
-        
-        if (pager->file_length % PAGE_SIZE)
-        {
-            // 因为我们要将本地数据库文件中的数据加载进内存，所以内存要为其分页以存			 				// 储这些数据，若数据库的文件整数页存放不下，则我们需要为其再多分配一页
-            num_pages += 1;
-		}
-        
-        // 若要读取的页在本地数据库文件中
-        if (page_num <= num_pages)
-        {
-            // 将文件指针指向我们要读取页的起始处（从文件开头偏移要读取页的页号*页			 	 			 // 页的大小）
-            lseek(pager->file_descriptor,page_num * PAGE_SIZE,SEEK_SET);
-            
-            // 将本页的数据读取到刚刚开辟的页空间page
-            // 从pager->file_descriptor读取到*page
-            ssize_t bytes_read = read(pager->file_descriptor,page,PAGE_SIZE);
-            
-            if (bytes_read == -1)
-            {
-                printf("Error reading file: %d\n",errno);
-                exit(EXIT_FAILURE);
-            }
-            
-        }
-        
-        pager->pages[page_num] = page;
-	}
-    
-    return pager->pages[page_num];
+// 其中page_num代表着当前要查询的数据位于哪页中
+
+// 接下来会重写row_slot，到时候就会清晰
+
+void* get_page(Pager* pager,uint32_t page_num)
+
+{
+
+    // 若要找/添加的数据超过最大页限制
+
+    if (page_num > TABLE_MAX_PAGES)
+
+    {
+
+        printf("Tired to fetch page number out of bounds.%d > %d\n",page_num,PAGE_MAX_PAGES);
+
+        exit(EXIT_FAILURE);
+
+    }
+
+    
+
+    // 若请求的页面不存在，在内存中分配空间，用于从本地数据库文件中加载
+
+    // 因为数据库中的页对应关系和内存中是相同的
+
+    if (pager->pages[page_num] == NULL)
+
+    {	
+
+        // 为其分配页空间
+
+        void* page = malloc(PAGE_SIZE);
+
+        // 当前本地文件中存在多少页的数据
+
+        uint32_t num_pages = pager->file_length / PAGE_SIZE;
+
+        
+
+        if (pager->file_length % PAGE_SIZE)
+
+        {
+
+            // 因为我们要将本地数据库文件中的数据加载进内存，所以内存要为其分页以存			 				// 储这些数据，若数据库的文件整数页存放不下，则我们需要为其再多分配一页
+
+            num_pages += 1;
+
+		}
+
+        
+
+        // 若要读取的页在本地数据库文件中
+
+        if (page_num <= num_pages)
+
+        {
+
+            // 将文件指针指向我们要读取页的起始处（从文件开头偏移要读取页的页号*页			 	 			 // 页的大小）
+
+            lseek(pager->file_descriptor,page_num * PAGE_SIZE,SEEK_SET);
+
+            
+
+            // 将本页的数据读取到刚刚开辟的页空间page
+
+            // 从pager->file_descriptor读取到*page
+
+            ssize_t bytes_read = read(pager->file_descriptor,page,PAGE_SIZE);
+
+            
+
+            if (bytes_read == -1)
+
+            {
+
+                printf("Error reading file: %d\n",errno);
+
+                exit(EXIT_FAILURE);
+
+            }
+
+            
+
+        }
+
+        
+
+        pager->pages[page_num] = page;
+
+	}
+
+    
+
+    return pager->pages[page_num];
+
 }
 ```
 
@@ -1693,11 +1863,16 @@ void pager_flush(Pager* pager,uint32_t page_num,uint32_t size)
 ## Cursor结构
 
 ``` {.c}
-typedef struct
-{
-    Table* table;
-    uint32_t row_num;
-    bool end_of_table;   
+typedef struct
+
+{
+
+    Table* table;
+
+    uint32_t row_num;
+
+    bool end_of_table;   
+
 }Cursor;
 ```
 
@@ -1714,27 +1889,44 @@ typedef struct
 和 `table_end()`用于创建这两个游标
 
 ``` {.c}
-Cursor* table_start(Table* table)
-{
-    Cursor* cursor = malloc(sizeof(Cursor));
-    cursor->table = table;
-    cursor->row_num = 0;
-    cursor->end_of_table = (table->nums_rows == 0); 
-    // 若当前总数据行数为0，就表示当前既是开头也是末尾
-    
-    return cursor;
+Cursor* table_start(Table* table)
+
+{
+
+    Cursor* cursor = malloc(sizeof(Cursor));
+
+    cursor->table = table;
+
+    cursor->row_num = 0;
+
+    cursor->end_of_table = (table->nums_rows == 0); 
+
+    // 若当前总数据行数为0，就表示当前既是开头也是末尾
+
+    
+
+    return cursor;
+
 }
 ```
 
 ``` {.c}
-Cursor* table_end(Table* table)
-{
-    Cursor* cursor = malloc(sizeof(Cursor));
-    cursor->table = table;
-    cursor->row_num = table->num_rows;
-    cursor->end_of_table = true;
-    
-    return cursor;
+Cursor* table_end(Table* table)
+
+{
+
+    Cursor* cursor = malloc(sizeof(Cursor));
+
+    cursor->table = table;
+
+    cursor->row_num = table->num_rows;
+
+    cursor->end_of_table = true;
+
+    
+
+    return cursor;
+
 }
 ```
 
@@ -1743,24 +1935,42 @@ Cursor* table_end(Table* table)
 之前我们索引对应行的函数是`void* row_slot(Table* table,uint32_t row_num)`,我们先将原来的函数拿来看一下（具体注释在上一部分中查看即可）
 
 ``` {.c}
-void* row_slot(Table* table,uint32_t row_num)
-{
-	uint32_t page_num = row_num / ROWS_PER_PAGE;
-    
-    // 确认了页号后，根据在页指针数组中找到该页对应的指针
-    void* page = table -> pages[page_num]
-        
-   	if (page == NULL)
-    {
-        page = table->pages[page_num] = malloc(PAGE_SIZE)
-    }
-
-    uint32_t row_offset = row_num % ROWS_PER_PAGE;
-    
-    // 当前页已经存在的数据条数 * 每条数据的大小 = 要存新数据的起始字节偏移量
-    uint32_t byte_offset = row_offset * ROW_SIZE;
-    
-    return page + byte_offset;
+void* row_slot(Table* table,uint32_t row_num)
+
+{
+
+	uint32_t page_num = row_num / ROWS_PER_PAGE;
+
+    
+
+    // 确认了页号后，根据在页指针数组中找到该页对应的指针
+
+    void* page = table -> pages[page_num]
+
+        
+
+   	if (page == NULL)
+
+    {
+
+        page = table->pages[page_num] = malloc(PAGE_SIZE)
+
+    }
+
+
+
+    uint32_t row_offset = row_num % ROWS_PER_PAGE;
+
+    
+
+    // 当前页已经存在的数据条数 * 每条数据的大小 = 要存新数据的起始字节偏移量
+
+    uint32_t byte_offset = row_offset * ROW_SIZE;
+
+    
+
+    return page + byte_offset;
+
 }
 ```
 
@@ -1770,32 +1980,52 @@ void* row_slot(Table* table,uint32_t row_num)
 我们重命名`row_slot()`为`cursor_value()`因为该函数用于返回游标指向的位置
 
 ``` {.c}
-void* cursor_value(Cursor* cursor)
-{
-    uint32_t row_num = cursor->row_num;
-    uint32_t page_num = row_num / ROWS_PER_PAGE;
-    
-    void* page = get_page(cursor->table->pager,page_num);
-    
-    uint32_t row_offset = row_num % PAGE_PER_PAGE;
-    uint32_t bytes_offset = row_offset * ROW_SIZE;
-    
-    return page + byte_offset;
+void* cursor_value(Cursor* cursor)
+
+{
+
+    uint32_t row_num = cursor->row_num;
+
+    uint32_t page_num = row_num / ROWS_PER_PAGE;
+
+    
+
+    void* page = get_page(cursor->table->pager,page_num);
+
+    
+
+    uint32_t row_offset = row_num % PAGE_PER_PAGE;
+
+    uint32_t bytes_offset = row_offset * ROW_SIZE;
+
+    
+
+    return page + byte_offset;
+
 }
 ```
 
 接下来如果我们想索引该数据对应的下一条数据只需将`Cursor`中的`row_num+1`即可，那么再下次查询的时候就会查询下一条数据
 
 ``` {.c}
-void cursor_advance(Cursor* cursor)
-{
-    cursor->row_num += 1;
-    
-    // 若下一条数据已经超过了当前存在的数据的条数，就说明当前已经到表尾了
-    if (cursor->row_num >= cursor->table->num_rows)
-    {
-        cursor->end_of_table = true;
-    }
+void cursor_advance(Cursor* cursor)
+
+{
+
+    cursor->row_num += 1;
+
+    
+
+    // 若下一条数据已经超过了当前存在的数据的条数，就说明当前已经到表尾了
+
+    if (cursor->row_num >= cursor->table->num_rows)
+
+    {
+
+        cursor->end_of_table = true;
+
+    }
+
 }
 ```
 
@@ -1804,191 +2034,721 @@ void cursor_advance(Cursor* cursor)
 为了防止我们写的写的晕了，首先把原始的虚拟机执行`insert`的代码拿过来
 
 ``` {.c}
-
-+ExecuteResult execute_insert(Statement* statement,Table* table)
-{
-    // 若当前页表中所有的页都已满，则不能再插入了
-    if (table->num_rows >= TABLE_MAX_ROWS)
-    {
-        return EXECUTE_TABLE_FULL;
-    }
-    
-    // 提示：statement->row_to_insert中存放着用户要插入的详细数据
-    Row* row_to_insert = &(statement->row_to_insert);
-    
-    // 将序列化的后的数据写入页中
-    serialize_row(row_to_insert,row_slot(table,table->num_rows));
-    
-    table->nums_rows += 1; // 插入了一条数据后，总的数据条数+1
-    
-    return EXECUTE_SUCCESS;
+
+
++ExecuteResult execute_insert(Statement* statement,Table* table)
+
+{
+
+    // 若当前页表中所有的页都已满，则不能再插入了
+
+    if (table->num_rows >= TABLE_MAX_ROWS)
+
+    {
+
+        return EXECUTE_TABLE_FULL;
+
+    }
+
+    
+
+    // 提示：statement->row_to_insert中存放着用户要插入的详细数据
+
+    Row* row_to_insert = &(statement->row_to_insert);
+
+    
+
+    // 将序列化的后的数据写入页中
+
+    serialize_row(row_to_insert,row_slot(table,table->num_rows));
+
+    
+
+    table->nums_rows += 1; // 插入了一条数据后，总的数据条数+1
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
 重构该代码，加入游标
 
 ``` {.c}
-ExecuteResult execute_insert(Statement* statement,Table* table)
-{
- 
-    if (table->num_rows >= TABLE_MAX_ROWS)
-    {
-        return EXECUTE_TABLE_FULL;
-    }
-    
-
-    Row* row_to_insert = &(statement->row_to_insert);
-    
-    Cursor* cursor = table_end(table); // 由于要插入数据，所以指向表尾部
-    
-
-    serialize_row(row_to_insert,cursor_value(cursor));  // 向表的尾部插入新数据
-    
-    table->nums_rows += 1; 
-    
-    free(cursor); 
-    // 使用完释放游标即可
-    // 由于游标是从table->nums_row中获取总数据数，所以不用担心其中的数据消失
-    // 只要table没有被释放，游标每次创建都可以动态获取最新的位置关系
-    
-    return EXECUTE_SUCCESS;
+ExecuteResult execute_insert(Statement* statement,Table* table)
+
+{
+
+ 
+
+    if (table->num_rows >= TABLE_MAX_ROWS)
+
+    {
+
+        return EXECUTE_TABLE_FULL;
+
+    }
+
+    
+
+
+
+    Row* row_to_insert = &(statement->row_to_insert);
+
+    
+
+    Cursor* cursor = table_end(table); // 由于要插入数据，所以指向表尾部
+
+    
+
+
+
+    serialize_row(row_to_insert,cursor_value(cursor));  // 向表的尾部插入新数据
+
+    
+
+    table->nums_rows += 1; 
+
+    
+
+    free(cursor); 
+
+    // 使用完释放游标即可
+
+    // 由于游标是从table->nums_row中获取总数据数，所以不用担心其中的数据消失
+
+    // 只要table没有被释放，游标每次创建都可以动态获取最新的位置关系
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
 当然，对于`select`我们也需要进行修改，老规矩，先把以前的`select`的实现代码拿来
 
 ``` {.c}
-ExecuteResult execute_select(Statement* statement,Table* table)
-{
-    Row row;
-    for (uint32_t i = 0; i < table->num_rows; i++)
-    {
-        // 将内存中序列化后的数据反序列化为结构体中的数据结构
-        deserialize_row(row_slot(table,i),&row);
-        print_row(&row);
-    }
-    
-    return EXECUTE_SUCCESS;
+ExecuteResult execute_select(Statement* statement,Table* table)
+
+{
+
+    Row row;
+
+    for (uint32_t i = 0; i < table->num_rows; i++)
+
+    {
+
+        // 将内存中序列化后的数据反序列化为结构体中的数据结构
+
+        deserialize_row(row_slot(table,i),&row);
+
+        print_row(&row);
+
+    }
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
 重构该代码，加入游标
 
 ``` {.c}
-ExecuteResult execute_select(Statement* statement,Table* table)
-{
-    Cursor* cursor = table_start(table); // 初始化游标只想表头
-    
-    Row row;
-    // 无需在进行for循环，使用我们之前用于移动游标的cursor_advance()函数即可
-    // for (uint32_t i = 0; i < table->num_rows; i++)
-    // {
-    
-    // 只要没有到表尾
-    while(!(cursor->end_of_table))
-    {
-        deserialize_row(cursor_value(cursor),&row);
-        print_row(&row);
-        cursor_advance(cursor); // 移动游标指向下一条数据
-    }
-        
-        free(cursor);
-        
-    // }
-    
-    return EXECUTE_SUCCESS;
+ExecuteResult execute_select(Statement* statement,Table* table)
+
+{
+
+    Cursor* cursor = table_start(table); // 初始化游标只想表头
+
+    
+
+    Row row;
+
+    // 无需在进行for循环，使用我们之前用于移动游标的cursor_advance()函数即可
+
+    // for (uint32_t i = 0; i < table->num_rows; i++)
+
+    // {
+
+    
+
+    // 只要没有到表尾
+
+    while(!(cursor->end_of_table))
+
+    {
+
+        deserialize_row(cursor_value(cursor),&row);
+
+        print_row(&row);
+
+        cursor_advance(cursor); // 移动游标指向下一条数据
+
+    }
+
+        
+
+        free(cursor);
+
+        
+
+    // }
+
+    
+
+    return EXECUTE_SUCCESS;
+
 }
 ```
 
 ## 完全差异 {#完全差异-2}
 
 ``` {.c}
-@@ -78,6 +78,13 @@ struct {
- } Table;
-
-+typedef struct {
-+  Table* table;
-+  uint32_t row_num;
-+  bool end_of_table; // Indicates a position one past the last element
-+} Cursor;
-+
- void print_row(Row* row) {
-     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
- }
-@@ -126,12 +133,38 @@ void* get_page(Pager* pager, uint32_t page_num) {
-     return pager->pages[page_num];
- }
-
--void* row_slot(Table* table, uint32_t row_num) {
--  uint32_t page_num = row_num / ROWS_PER_PAGE;
--  void *page = get_page(table->pager, page_num);
--  uint32_t row_offset = row_num % ROWS_PER_PAGE;
--  uint32_t byte_offset = row_offset * ROW_SIZE;
--  return page + byte_offset;
-+Cursor* table_start(Table* table) {
-+  Cursor* cursor = malloc(sizeof(Cursor));
-+  cursor->table = table;
-+  cursor->row_num = 0;
-+  cursor->end_of_table = (table->num_rows == 0);
-+
-+  return cursor;
-+}
-+
-+Cursor* table_end(Table* table) {
-+  Cursor* cursor = malloc(sizeof(Cursor));
-+  cursor->table = table;
-+  cursor->row_num = table->num_rows;
-+  cursor->end_of_table = true;
-+
-+  return cursor;
-+}
-+
-+void* cursor_value(Cursor* cursor) {
-+  uint32_t row_num = cursor->row_num;
-+  uint32_t page_num = row_num / ROWS_PER_PAGE;
-+  void *page = get_page(cursor->table->pager, page_num);
-+  uint32_t row_offset = row_num % ROWS_PER_PAGE;
-+  uint32_t byte_offset = row_offset * ROW_SIZE;
-+  return page + byte_offset;
-+}
-+
-+void cursor_advance(Cursor* cursor) {
-+  cursor->row_num += 1;
-+  if (cursor->row_num >= cursor->table->num_rows) {
-+    cursor->end_of_table = true;
-+  }
- }
-
- Pager* pager_open(const char* filename) {
-@@ -327,19 +360,28 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
-     }
-
-   Row* row_to_insert = &(statement->row_to_insert);
-+  Cursor* cursor = table_end(table);
-
--  serialize_row(row_to_insert, row_slot(table, table->num_rows));
-+  serialize_row(row_to_insert, cursor_value(cursor));
-   table->num_rows += 1;
-
-+  free(cursor);
-+
-   return EXECUTE_SUCCESS;
- }
-
- ExecuteResult execute_select(Statement* statement, Table* table) {
-+  Cursor* cursor = table_start(table);
-+
-   Row row;
--  for (uint32_t i = 0; i < table->num_rows; i++) {
--     deserialize_row(row_slot(table, i), &row);
-+  while (!(cursor->end_of_table)) {
-+     deserialize_row(cursor_value(cursor), &row);
-      print_row(&row);
-+     cursor_advance(cursor);
-   }
-+
-+  free(cursor);
-+
-   return EXECUTE_SUCCESS;
+@@ -78,6 +78,13 @@ struct {
+
+ } Table;
+
+
+
++typedef struct {
+
++  Table* table;
+
++  uint32_t row_num;
+
++  bool end_of_table; // Indicates a position one past the last element
+
++} Cursor;
+
++
+
+ void print_row(Row* row) {
+
+     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+
+ }
+
+@@ -126,12 +133,38 @@ void* get_page(Pager* pager, uint32_t page_num) {
+
+     return pager->pages[page_num];
+
+ }
+
+
+
+-void* row_slot(Table* table, uint32_t row_num) {
+
+-  uint32_t page_num = row_num / ROWS_PER_PAGE;
+
+-  void *page = get_page(table->pager, page_num);
+
+-  uint32_t row_offset = row_num % ROWS_PER_PAGE;
+
+-  uint32_t byte_offset = row_offset * ROW_SIZE;
+
+-  return page + byte_offset;
+
++Cursor* table_start(Table* table) {
+
++  Cursor* cursor = malloc(sizeof(Cursor));
+
++  cursor->table = table;
+
++  cursor->row_num = 0;
+
++  cursor->end_of_table = (table->num_rows == 0);
+
++
+
++  return cursor;
+
++}
+
++
+
++Cursor* table_end(Table* table) {
+
++  Cursor* cursor = malloc(sizeof(Cursor));
+
++  cursor->table = table;
+
++  cursor->row_num = table->num_rows;
+
++  cursor->end_of_table = true;
+
++
+
++  return cursor;
+
++}
+
++
+
++void* cursor_value(Cursor* cursor) {
+
++  uint32_t row_num = cursor->row_num;
+
++  uint32_t page_num = row_num / ROWS_PER_PAGE;
+
++  void *page = get_page(cursor->table->pager, page_num);
+
++  uint32_t row_offset = row_num % ROWS_PER_PAGE;
+
++  uint32_t byte_offset = row_offset * ROW_SIZE;
+
++  return page + byte_offset;
+
++}
+
++
+
++void cursor_advance(Cursor* cursor) {
+
++  cursor->row_num += 1;
+
++  if (cursor->row_num >= cursor->table->num_rows) {
+
++    cursor->end_of_table = true;
+
++  }
+
+ }
+
+
+
+ Pager* pager_open(const char* filename) {
+
+@@ -327,19 +360,28 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
+
+     }
+
+
+
+   Row* row_to_insert = &(statement->row_to_insert);
+
++  Cursor* cursor = table_end(table);
+
+
+
+-  serialize_row(row_to_insert, row_slot(table, table->num_rows));
+
++  serialize_row(row_to_insert, cursor_value(cursor));
+
+   table->num_rows += 1;
+
+
+
++  free(cursor);
+
++
+
+   return EXECUTE_SUCCESS;
+
+ }
+
+
+
+ ExecuteResult execute_select(Statement* statement, Table* table) {
+
++  Cursor* cursor = table_start(table);
+
++
+
+   Row row;
+
+-  for (uint32_t i = 0; i < table->num_rows; i++) {
+
+-     deserialize_row(row_slot(table, i), &row);
+
++  while (!(cursor->end_of_table)) {
+
++     deserialize_row(cursor_value(cursor), &row);
+
+      print_row(&row);
+
++     cursor_advance(cursor);
+
+   }
+
++
+
++  free(cursor);
+
++
+
+   return EXECUTE_SUCCESS;
+
  }
 ```
+B-Tree是SQLite用来表示表和索引的数据结构，也是接下来及部分我们核心要完成的数据结构
+
+![B-tree](https://raw.githubusercontent.com/De4tsh/typoraPhoto/main/img/202209191458364.png)
+
+（https://en.wikipedia.org/wiki/File:B-tree.svg）`B-Tree`
+
+上面为B树的结构图，具体B树的优点、效率我们就不在此处讨论了，我们重在写出其实际的实现
+
+我们接下来要实现的是B树的一种变体**B+树**，这也是SQLite使用的数据结构，这里简单引用原文对B+ Tree的图例，方便理解
+
+![btree6](https://raw.githubusercontent.com/De4tsh/typoraPhoto/main/img/202209191505132.png)
+
+图示为一张3级B+ Tree，其中蓝色部分为内部结点不存数据只存索引与叶子节点的指针，绿色部分则位叶子结点，存放着键值对（我们的数据）
+
+## 页结点格式
+
+### 之前存储结构的不足
+
+若我们不使用树结构，则当前格式每个页面仅存放数据行，没有任何的额外数据（元数据），非常节约空间，向末尾追加新的数据行也会非常快。
+
+但是一旦遇到查找，效率就会降下来，因为我们需要扫描整个表来完成；删除同样会遇到问题，由于我们是顺序存储，所以删除其中的某一条数据势必要将其后的所有数据前移，影响效率；在数据中间插入新数据同样会面临这个问题
+
+因此我们**将使用树结构来重构我们的数据存储格式，树中每个节点都可以包含可变数量的行，所以我们不得不在每个节点页中存储一些信息来跟踪他的状态**
+
+这也是一种取舍，我们通过空间换取了时间，**舍弃了为节点页增加描述信息，以及内部节点（不存储数据）对空间的占用这些额外空间，换来了更高效的插入、删除和查找**。
+
+### 节点头格式
+
+> 节点类型分为 **叶子节点** 和 **内部节点**，我们通过建立一个枚举类型来跟踪节点类型
+
+```C
+typedef enum
+{
+    NODE_INTERNAL, // 内部节点
+    NODE_LEAF // 叶子节点
+}NodeType;
+```
+
+**每个节点对应一页**，**内部节点将通过存储子节点的页码来指向它们的子节点**。B+ Tree向Pager请求特定的页号，并取回一个指向页缓存的指针。页面按页码顺序一个接一个地存储在数据库文件中
+
+为了防止忘记Pager的作用，我们再将其结构体拿来看一下：
+
+```C
+typedef struct {
+  int file_descriptor; // 文件描述符
+  uint32_t file_length; // 文件大小长度
+  void* pages[TABLE_MAX_PAGES]; // 页指针数组
+} Pager;
+
+```
+
+为完成上述的功能，我们需要向每个页（也就是一个节点）的开头的标头处存储一些元数据：
+
+- 该节点是什么类型的节点
+- 该节点是否为根节点
+- 指向父亲节点的指针
+
+#### 通用节点标头布局
+
+> 无论是叶子节点还是内部节点都应在页的开始包含该标头
+
+```C
+// 节点类型
+const uint32_t NODE_TYPE_SIZE = sizeof(uint8_t); // 一个字节
+const uint32_t NODE_TYPE_OFFSET = 0; // 处于页的最开头第一个字节
+
+// 是否为根节点
+const uint32_t IS_ROOT_SIZE = sizeof(uint8_t); // 一个字节
+const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE; // 紧跟节点类型的下一个字节
+
+// 指向父亲节点的指针
+const uint32_t PARENT_POINTER_SIZE = sizeof(uint32_t); // 4字节 32位指针
+const uint32_t PARENT_PIONTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE; // 紧跟上一字节
+
+// 通用节点标头所占的总空间
+const uint8_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE; // 上述三个基本信息一共占 1 + 1 + 4 = 6字节
+
+```
+
+#### 叶节点标头格式布局
+
+> 叶节点的头部表示信息紧跟着通用节点标头之后
+
+叶节点用于存储数据，叶节点的主体是单元格，由许多单元格组成，每一个单元格都是一个键/值（`key/value`）对，其中值就是我们之前序列化后的`Row`
+
+所以在头部我们需要表示该叶节点包含多少单元
+
+```C
+// 最多容纳的单元格数量为4字节大小
+const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t); 
+// 紧跟在通用节点标头之后
+const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = COMMON_NODE_HEADER_SIZE; 
+
+// 叶节点标头 + 通用节点标头所占据的总大小
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+```
+
+#### 叶节点主体格式布局
+
+如刚刚所说，叶节点的主题由单元格构成，所以我们接下来要来规定单元格的结构
+
+```C
+// 键所占的空间及偏移 key
+const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_KEY_OFFSET = 0;
+
+// 值所占的空间及其偏移 value
+const uint32_t LEAF_NODE_VALUE_SIZE = ROW_SIZE; // 之前定义过，表示一条用户数据的大小
+const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
+
+// 一个单元格的大小 key + vlaue
+const uint32_t LEAF_NODE_CELL_SIZE = LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE;
+
+// 在结尾处会出现容纳不下一个完整单元格的冗余空间
+// 一个页中出去通用表头和页标头后剩余的空间
+const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
+
+//一个页除去上述所说的标头信息外能存储的最多单元格个数
+const uint32_t LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+```
+
+### 最终的总体节点页结构
+
+![WeChat Screenshot_20220919183946](https://raw.githubusercontent.com/De4tsh/typoraPhoto/main/img/202209191841965.png)
+
+## 访问叶节点的属性信息
+
+既然我们刚刚在每个节点（页）的开头定义了一些描述信息，那么我们页需要提供额外的接口用于获取这些描述信息
+
+### 访问叶节点字段
+
+```C
+// 获取node指向的叶节点标头的信息
+// 用于获取该叶节点中单元格的个数
+uint32_t leaf_node_num_cells(void* node)
+// node指向一个页（节点）的开始
+{
+    return node + LEAF_NODE_NUM_CELLS_OFFSET;
+}
+
+// 定位到页节点中第cell_num单元格，返回其指针
+void* leaf_node_cell(void* node,uint32_t cell_num)
+{
+    return node + LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE;
+}
+
+// 该函数意在获取单元格数据键值对中key的地址
+// 但由于key值的地址其实就是一个单元格的起始地址，所以此函数站在功能的  // 角度上并没有存在的必要，但站在封装的角度上还是有必要的 
+uint32_t* leaf_node_key(void* node,uint32_t cell_num)
+{
+    return leaf_node_cell(node,cell_num);
+}
+
+// 获取对应单元格value的地址
+uint32_t leaf_node_value(void* node,uint32_t cell_num)
+{
+    return leaf_node_cell(node,cell_num) + LEAF_NODE_KEY_SIZE;
+}
+
+// 初始化单元格个数 = 0
+void initialize_leaf_node(void* node)
+{
+    
+    // 相当于 (node + LEAF_NODE_NUM_CELLS_OFFSET) = 0
+    *leaf_node_num_cells(node) = 0;
+}
+```
+
+### Pager/Table对象结构与操作方法的修改
+
+先来回顾以下 `Pager` 和 `Table` 的结构体：
+
+```C
+typedef struct
+{
+    int file_descriptor; // 用于存放文件描述符
+    uint32_t file_length; // 文件的大小
+    void* pages[TABLE_MAX_PAGES];
+}Pager;
+```
+
+```C
+typedef struct
+{
+	Pager* pager;
+    uint32_t num_rows;
+}Table;
+```
+
+之前我们再数据库关闭时（db_close()）要将内存中的数据刷入本地数据库文件中，使用的方法是 `pager_flush()` 为防止遗忘，我们拿来看一下
+
+```C
+void pager_flush(Pager* pager,uint32_t page_num,uint32_t size)
+{
+	
+    if (page->page[page_num] == NULL)
+    {
+        printf("Tired to flush null page.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // 在这之前已经写入了page_num * PAGE_SIZE大小的数据了
+    off_t offset = lseek(pager->file_descriptor,page_num * PAGE_SIZE,SEEK_SET);
+    
+    if (offset == -1)
+    {
+        printf("Error seeking: %d\n"errno);
+        exit(EXIT_FAILURE);
+    }
+    
+    ssize_t bytes_written = write(pager->descriptor,pager->pages[page_num],size);
+    
+    if (bytes_written == -1)
+    {
+        printf("Error writing: %d\n",errno);
+        exit(EXIT_FAILURE);
+    }
+
+}
+```
+
+当时说过，该函数的设计是存在缺陷的，因为他要规定写入数据的`size`，这非常不符合我们按页进行存取的理念，**当时这么做是因为最后一页中会有零散的数据（所谓的零散就是没有填满一个页）**，所以我们需要通过`size`值传递零散数据的条数，达到将其写入本地数据库文件的目的
+
+而现在由于我们引入了B+ Tree，所以一切都以节点为单位，一个节点正好是一页，此时我们便无需指定`size`，因为`size`固定都是`PAGE_SIZE`，即使没有填满我们也将写入一个页
+
+新版`pager_flush()`
+
+```C
+void pager_flush(Pager* pager,uint32_t page_num)
+{
+    if (pager->pages[page_num] == NULL)
+    {
+        printf("Tired to flush null page\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    ssize_t bytes_written = write(pager->descriptor,pager->pages[page_num],PAGE_SIZE);
+    
+    if (bytes_written == -1)
+    {
+        printf("Error writing:%d\n",errno);
+    }
+}
+```
+
+显得非常的清爽，同样我们也需要修改调用`pager_flush()`的函数db_close()
+
+```C
+void db_close(Table* table)
+{
+    Pager* pager = table->pager;
+    
+    // 将内存中存在页（节点）的内容写入本地数据库文件
+    for (uint32_t i = 0;i < pager->num_pages; i++)
+    {
+        if (pager->pages[i] == NULL)
+        {
+            continue;
+		}
+        
+        pager_flush(pager,i);
+        free(pager->page[i]);
+        pager->pages[i] = NULL
+    }
+    
+    int result = close(pager->file_descriptor);
+    if (result == -1)
+    {
+        printf("Error closing db file.\n");
+    }
+}
+```
+
+相比于以前那个版本，还需要判断最后有没有没填满一个页的数据，再单独写入的版本，此时按节点操作后，将变得无比的简单
+
+现在由于我们在真正的按页操作（节点），每个页的标头信息中也会存储当前页数据量等信息，因此现在，**我们存储一个页面有多少行、以及所有页能存储多少条数据变得没有意义**
+
+```C
+// 删除如下已经没有意义的定义
+-	const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
+-	const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
+```
+
+取而代之的我们应当在结构体中定义出当前存在的节点数（页数）
+
+```C
+typedef struct
+{
+    int file_descriptor;
+    uint32_t file_length;
+    uint32_t num_pages; // 新增节点个数
+    void* pages[TABLE_MAX_PAGES];
+}
+
+typedef struct
+{
+    Pager* pager;
+    uint32_t root_page_num; // ！！！新增根节点的页号！！！
+}Table;
+```
+
+麻烦的事情来了，由于我们修改了该结构体，所以使用过上述删除参数的函数都要重写，并为其安排上新的参数信息，不着急我们一个一个修改
+
+首先第一个是 `void* get_page(Pager* pager, uint32_t page_num)`
+
+```C
+        }
+        
+        pager->pages[page_num] = page;
+
+		// 此时由于节点数发生了增加，所以我们需要更新num_pages值
+		if (page_num >= pager->num_pages)
+        {
+            pager->num_pages = page_num +1;
+        }
+	}
+    
+    return pager->pages[page_num];
+}
+```
+
+首先第二个是 `Pager* pager_open(const char* filename)` 其原函数为：
+
+```C
+Pager* pager_open(const char* filename)
+{
+    int fd = open(filename,O_RDWR | O_CREAT,S_IWUSR | S_IRUSR);
+    
+    if (fd == -1) // 若打开失败
+    {
+        printf("Uable to open file.\n"); 
+        // perror("open()");
+        // 但此处用户无需知道过多细节，所以无需返回详细错误
+        exit(EXIT_FAILURE);
+    }
+    
+    // 获取打开文件的大小
+    off_t file_length = lseek(fd,0,SEEK_END)
+        
+    Pager* pager = malloc(sizeof(Pager));
+    pager->file_descriptor = fd;
+    page->file_length = file_length;
+    
++	pager->num_pages = (file_length / PAGE_SIZE);
++	
++	if (file_length % PAGE_SIZE != 0)
++	{
++    	// 由于我们存储的时候都是按页存储的，所以若是读取时
++   	// 有一页未满的数据，就说明数据库文件发生了错误
++    	printf("Db file is not a whole number of pages.\n");
++    	exit(EXIT_FAILURE);
++	}
++
++
+    
+    
+    
+    // 初始化页指针数组
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        pager->pager[i] = NULL;
+    }
+    
+    return pager;
+}
+```
+
+
