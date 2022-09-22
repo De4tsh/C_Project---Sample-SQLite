@@ -2384,6 +2384,8 @@ ExecuteResult execute_select(Statement* statement,Table* table)
 
  }
 ```
+# Part 8 - B-Tree Leaf Node Format
+
 B-Tree是SQLite用来表示表和索引的数据结构，也是接下来及部分我们核心要完成的数据结构
 
 ![B-tree](https://raw.githubusercontent.com/De4tsh/typoraPhoto/main/img/202209191458364.png)
@@ -2543,7 +2545,7 @@ uint32_t leaf_node_value(void* node,uint32_t cell_num)
     return leaf_node_cell(node,cell_num) + LEAF_NODE_KEY_SIZE;
 }
 
-// 初始化单元格个数 = 0
+// 初始化当前节点单元格个数 = 0
 void initialize_leaf_node(void* node)
 {
     
@@ -2751,4 +2753,261 @@ Pager* pager_open(const char* filename)
 }
 ```
 
+话不多说，我们继续，由于我们目前是以节点为单位在索引数据，所以在第六部分实现的游标功能也要发生相应的变化，当然首当其中的就是修改其结构体的定义
+
+`Cursor`代表表格中的一个位置，之前我们只是通过简单地行号来索引数据，现在是一颗由节点组成的树，所以我们应当通过**节点的页码**和**节点内单元格的编号**来索引数据，所以我们来重新定义一下之前用过的`Cursor`结构体
+
+```C
+typedef struct 
+{
+    Table* table;
+    uint32_t page_num; // 节点的页码（页号）
+    uint32_t cell_num; // 节点内单元格编号
+    bool end_of_table
+}Cursor;
+```
+
+由于其结构体发生了变化，所以其初始化函数，以及调用了`Cursor`处的函数都要进行重新设计
+
+**表头游标**
+
+`Cursor* table_start(Table* table)`
+
+```C
+Cursor* table_start(Table* table)
+{
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    
+    // 初始只有根节点
+    cursor->page_num = table->root_page_num; // 根节点的页号
+    cursor->cell_num = 0; // 指向数据表头
+    
+    // 找到头节点页的指针
+    void* root_node = get_page(table->pager,table->root_page_num);
+    // 获取头节点中用于存放当前节点中单元格个数的空间的地址
+    uint32_t num_cells = *leaf_node_num_cells(root_node);
+    
+    // 若num_cells = 0 则说明当前没有数据，所以现在表头就是表尾
+    cursor->end_of_table = (num_cells == 0);
+    
+    return cursor;
+}
+```
+
+**表尾游标**
+
+`Cursor* table_end(Table* table)`
+
+```C
+Cursor* table_end(Table* table)
+{
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    
+    cursor->page_num = table->root_page_num;
+    
+    // 无论是表头游标还是表尾游标，都要保存根节点的信息，用于从根点出发索引其他节点
+    void* root_node = get_page(table->pager, table->root_page_num);
+  	uint32_t num_cells = *leaf_node_num_cells(root_node);
+    
+    // 将表尾游标指向头节点的尾部
+  	cursor->cell_num = num_cells;
+   	cursor->end_of_table = true;
+     
+}
+```
+
+获取游标所指处的`value`值
+
+```C
+void* cursor_value(Cursor* cursor)
+{
+    // 返回当前页号的页指针，若当前页不再内存中而在本地数据库文件中，则将文件中的
+    // 数据换回内存
+	void* page = get_page(cursor->table->pager,page_num);
+    
+    // 返回对应页中要查寻对应单元格value的地址
+    return leaf_node_value(page,cursor->cell_num);
+	
+}
+```
+
+索引该数据对应的下一条数据
+
+``` C
+void* cursor_advance(Cursor* cursor)
+{
+	uint32_t page_num = cursor->page_num;
+    
+    // 为了获取当前节点的指针
+    void* node = get_page(cursor->table->pager,page_num);
+    
+    // 指向下一个单元格
+    cursor->cell_num += 1;
+    
+    // +1 后指向的单元格，大于记录存在的单元格个数，则说明当前处于尾部
+    if (cursor->cell_num >= (*leaf_node_num_cells(node)))
+    {
+        cursor->end_of_table = true;
+    }
+}
+```
+
+## 插入叶节点
+
+上面解决了搜寻、查找节点等问题后，就到了最重要的地方了，我们如何插入叶节点
+
+最初的时候叶节点是没有任何数据的，是一个空节点，我们可以向其中插入键值对（`key - value`）直到叶节点已满
+
+#### 初始化
+
+当我们第一次打开数据库时，数据库文件是空的，所以我们将第0页初始化为一个空的叶子节点（根节点），所以此处我们还要重新写我们的`db_open()`函数
+
+```C
+Table* db_open(const char* filename)
+{
+    // 初始化页指针等
+    Pager* pager = pager_open(filename);
+    
+    Table* table = malloc(sizeof(Table));
+    table->pager = pager;
+    table->root_page_num = 0; // 指定根节点的页号
+    
+    // 本地数据库文件中没有数据
+    if (pager->nums_pages == 0)
+    {
+        // 找到0页的页指针，若没有则创建
+        void* root_node = get_page(pager,0);
+        
+        // 初始化当前节点单元格个数 = 0
+        initialize_leaf_node(root_node);
+    }
+}
+```
+
+#### 插入key-value于叶节点中
+
+我们将向Cursor指向处插入键值对
+
+```C
+// value实际上是有效数据结构体的指针
+void leaf_node_insert(Cursor* cursor,uint32_t key,Row* value)
+{
+    // 找到当前cursor所指节点（页）的指针
+    void* node = get_page(cursor->table->pager,cursor->page_num);
+    
+    // 确认当前节点中存在的单元格个个数（数据个数）
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    
+    // 当前节点已满
+    if (num_cells >= LEAF_NODE_MAX_CELLS)
+    {
+        printf("Need to implemment splitting a leaf node.\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // 若当前要插入的位置位于已存在的两个数据之间
+    // 则需要把从最后一个数据一直到插入点之间的数据，都想后复制
+    if (cursor->cell_num < num_cells)
+    {
+        for (uint32_t i = num_cells; i > cursor->cell_num; i--)
+        {
+            memcpy(leaf_node_cell(node,i),leaf_node_cell(node,i - 1),LEAF_NODE_CELL_SIZE);
+        }
+    }
+    
+    // 当前节点中数据量+1
+    *(leaf_node_num_cells(node)) += 1;
+    *(leaf_node_key(node,cursor->cell_num)) = key;
+    
+    serialize_row(value,leaf_node_value(node,cursor->cell_num));
+    
+}
+```
+
+但目前上述代码有一个很巨大的问题，那就是一旦当前页面满了，我们就直接报错退出处理了，这肯定是不对的，为此我们在执行`leaf_node_insert()`前应当进行一部判断，**若判断处要插入的节点已经满了，就切换到下一个节点，避免直接退出程序，由于该操作要在执行insert之前进行，所以我们要在扮演虚拟机的函数中进行**
+
+```C
+ExecuteResult execute_insert(Statement* statement,Table* table)
+{
+    void* node = get_page(table_pager,table->root_page_num);
+    if ((*leaf_node_num_cells(node) >= LEAF_NODE_MAX_CELLS))
+    {
+        return EXECUTE_TABLE_FULL;
+    }
+    
+    Row* row_to_insert = &(statement->row_to_insert);
+    Cursor* cursor = table_end(table);
+    
+    leaf_node_insert(cursor,row_to_insert->id,row_to_insert);
+    
+    free(cursor);
+}
+```
+
+至此我们已经用节点结构接替了原先的结构，为了方便我们观测节点信息的变化，我们可以将一些重要的信息打印出来，便于观测
+
+### 树可视化
+
+节点相关信息
+
+```C
+void print_constants() 
+{
+  printf("ROW_SIZE: %d\n", ROW_SIZE);
+  printf("COMMON_NODE_HEADER_SIZE: %d\n", COMMON_NODE_HEADER_SIZE);
+  printf("LEAF_NODE_HEADER_SIZE: %d\n", LEAF_NODE_HEADER_SIZE);
+  printf("LEAF_NODE_CELL_SIZE: %d\n", LEAF_NODE_CELL_SIZE);
+  printf("LEAF_NODE_SPACE_FOR_CELLS: %d\n", LEAF_NODE_SPACE_FOR_CELLS);
+  printf("LEAF_NODE_MAX_CELLS: %d\n", LEAF_NODE_MAX_CELLS);
+}
+
+```
+
+节点中的数据信息
+
+```C
+void print_leaf_node(void* node) 
+{
+  uint32_t num_cells = *leaf_node_num_cells(node);
+  printf("leaf (size %d)\n", num_cells);
+  for (uint32_t i = 0; i < num_cells; i++) 
+  {
+    uint32_t key = *leaf_node_key(node, i);
+    printf("  - %d : %d\n", i, key);
+  }
+}
+
+```
+
+由于这些数据与SQL操作无关，所以我们将其调用加在数据库元命令中
+
+```C
+MetaCommandResult do_meta_command(InputBuffer* input_buffer, Table* table) 
+{
+    if (strcmp(input_buffer->buffer, ".exit") == 0) 
+    {
+     	db_close(table);
+     	exit(EXIT_SUCCESS);
+  	} 
+    else if (strcmp(input_buffer->buffer, ".constants") == 0) 
+    {
+    	printf("Constants:\n");
+    	print_constants();
+    	return META_COMMAND_SUCCESS;
+   	} 
+    else if (strcmp(input_buffer->buffer, ".btree") == 0) 
+    {
+    	printf("Tree:\n");
+    	print_leaf_node(get_page(table->pager, 0));
+    	return META_COMMAND_SUCCESS;
+   	} 
+    else 
+    {
+     return META_COMMAND_UNRECOGNIZED_COMMAND;
+   	}
+}
+    
+```
 
