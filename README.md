@@ -1,6 +1,7 @@
 # C_Project---Sample-SQLite
 C语言实现简单SQLite数据库
 ## 项目介绍
+代码将在最后全部完成后上传
 
 具体介绍请见Wiki，Wiki中给出了代码的详细介绍，与相关功能实现的原理理由
 
